@@ -1,0 +1,8 @@
+path: data/parafuso_porcas
+train: images/train
+val: images/val
+
+nc: 2
+names:
+  0: Parafuso
+  1: Porca

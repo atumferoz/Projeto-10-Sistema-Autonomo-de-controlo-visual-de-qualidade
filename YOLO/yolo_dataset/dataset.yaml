@@ -1,0 +1,15 @@
+# dataset.yaml content
+
+# Path to the dataset root folder (inside the Docker container)
+path: /usr/src/datasets 
+
+# Relative paths to image directories from the 'path' variable
+train: images/train
+val: images/val
+# test: images/test # You can skip test for now
+
+# Number of classes
+nc: 2
+
+# Class names (must match the order Label Studio assigned them, usually alphabetically)
+names: ['Parafuso', 'Porca']

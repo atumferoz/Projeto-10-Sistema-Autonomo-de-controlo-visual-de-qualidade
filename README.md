@@ -6,3 +6,6 @@ Um sistema autónomo de controlo visual de qualidade combina câmaras, sensores,
 Realizado pelos alunos:
 - Jossilene Tavares
 - Mariama Kamara
+
+
+Link ao Trello: https://trello.com/b/Kvv4Hxd7/projeto-1

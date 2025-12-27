@@ -1,0 +1,210 @@
+
+
+docker network create --driver bridge --subnet 172.20.0.0/16 ovs-net (e0b7359b3be6f4836905689301b021ed24441fbfe967bb9891784058da885ca8)
+
+
+docker run -it -v C:/Users/junec/YOLO/YOLO_TF_Project:/workspace -p 6006:6006 tensorflow/tensorflow:latest bash
+
+
+docker run -it --rm -v ${PWD}:/workspace --shm-size=8g yolo-obb
+
+
+docker run --hostname=f9257f2564c6 --env=PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin --env=NVIDIA_VISIBLE_DEVICES=all --env=NVIDIA_DRIVER_CAPABILITIES=compute,utility --env=LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64 --env=PYTORCH_VERSION=2.9.1 --env=PYTHONUNBUFFERED=1 --env=PYTHONDONTWRITEBYTECODE=1 --env=PIP_NO_CACHE_DIR=1 --env=PIP_BREAK_SYSTEM_PACKAGES=1 --env=MKL_THREADING_LAYER=GNU --env=OMP_NUM_THREADS=1 --env=TF_CPP_MIN_LOG_LEVEL=3 --volume=C:\Users\junec\YOLO\YOLO_Project:/workspace --network=bridge --workdir=/workspace --restart=no --label='com.nvidia.volumes.needed=nvidia_driver' --label='org.opencontainers.image.description=Ultralytics image' --label='org.opencontainers.image.licenses=AGPL-3.0-or-later' --label='org.opencontainers.image.ref.name=ubuntu' --label='org.opencontainers.image.source=https://github.com/ultralytics/ultralytics' --label='org.opencontainers.image.version=22.04' --runtime=runc -t -d yolo-obb
+
+
+
+
+docker run -it --rm `
+  --gpus all `
+  -v ${PWD}:/workspace `
+  --shm-size=8g `
+  yolo-obb
+
+--gpus all
+
+
+
+
+
+yolo obb train \
+  model=yolov8n-obb.pt \
+  data=data/parafuso_porcas/dataset.yaml \
+  imgsz=640 \
+  epochs=200 \
+  batch=16 \
+  workers=4 \
+  project=runs/obb \
+  name=parafuso_porca_v2
+
+
+yolo detect val \
+  model=runs/obb/parafuso_porca_v2/weights/best.pt \
+  data=data/parafuso_porcas/dataset.yaml \
+  imgsz=640 \
+  batch=1
+
+
+
+cp -r /ultralytics/runs/obb/predict /workspace/predicts
+
+
+
+
+yolo detect predict \
+  model=runs/obb/parafuso_porca_v2/weights/best.pt \
+  source=data/test_images \
+  imgsz=640 \
+  conf=0.25 \
+  save=True
+
+
+
+Your workflow is:
+
+Label → Train → Validate → Predict → Analyze → Add Data → Retrain
+
+
+
+docker cp 34a08f0fba4a8244046ac4cc0817ae523ceb0704e680aebd79345e14f328c75f: /ultralytics/runs/obb/train/weights/best.pt C:/Users/junec/YOLO/
+
+
+
+------------------FILE ORGANIZATION BEFORE INSTALLING, TRAINING AND TESTING YOLO--------------------------
+
+
+YOLO_Project/
+├── Dockerfile
+├── data/
+│   └── parafuso_porcas/
+│       ├── images/
+│       │   ├── train/
+│       │   └── val/
+│       ├── labels/
+│       │   ├── train/
+│       │   └── val/
+│       ├── dataset.yaml
+│       ├── classes.txt
+│       └── notes.json
+└── runs/
+
+
+NOTE: On images and labels, train receives 85% of images/labels and val receives 15% of images/labels
+
+--------INSIDE DOCKERFILE-------------
+
+FROM ultralytics/ultralytics:latest
+
+WORKDIR /workspace
+
+# Optional but recommended
+RUN pip install --upgrade pip
+
+CMD ["/bin/bash"]
+
+
+----------INSIDE DATASET.YAML-----------
+
+path: data/parafuso_porcas
+train: images/train
+val: images/val
+
+nc: 2
+names:
+  0: Parafuso
+  1: Porca
+
+
+-----------------------how to install and use yolo--------------------------
+
+--------------enter directory ON POWERSHELL---------------
+
+cd "C:\Users\junec\YOLO\YOLO_Projectv2"
+
+-------------build yolo image------------------
+
+docker build -t yolo-obb .
+
+---------------------------run container using gpu--------------------------
+
+docker run -it --rm `
+  --gpus all `
+  -v C:\Users\junec\YOLO\YOLO_Projectv2:/workspace `
+  -w /workspace `
+  --shm-size=8g `
+  ultralytics/ultralytics:latest
+
+------------------------------------train yolo-------------------------
+
+yolo obb train \
+  model=yolov8n-obb.pt \
+  data=data/parafuso_porcas/dataset.yaml \
+  imgsz=640 \
+  epochs=200 \
+  batch=16 \
+  workers=4 \
+  project=runs/obb \
+  name=parafuso_porca_train_v1
+
+---------------------------------validate training----------------------
+
+yolo detect val \
+  model=runs/obb/parafuso_porca_train_v1/weights/best.pt \
+  data=data/parafuso_porcas/dataset.yaml \
+  imgsz=640 \
+  batch=1
+
+-----------------------------copy validation output to PC--------
+
+cp -r /ultralytics/runs/obb/val /workspace/val_results
+
+
+----------------------------- Run inference on new images---------------------------
+
+yolo detect predict \
+  model=runs/obb/parafuso_porca_train_v1/weights/best.pt \
+  source=data/test_images \
+  imgsz=640 \
+  conf=0.25 \
+  save=True
+
+
+yolo detect predict \
+  model=runs/obb/parafuso_porca_train_v1/weights/best.pt \
+  source=data/test_images \
+  imgsz=640 \
+  conf=0.30 \
+  save=True
+
+
+yolo detect predict \
+  model=runs/obb/parafuso_porca_train_v1/weights/best.pt \
+  source=data/test_images \
+  imgsz=640 \
+  conf=0.35 \
+  save=True
+
+yolo detect predict \
+  model=runs/obb/parafuso_porca_train_v1/weights/best.pt \
+  source=data/test_images \
+  imgsz=640 \
+  conf=0.70 \
+  save=True
+
+----------------------copy inference/predict output to PC--------------------------
+
+cp -r /ultralytics/runs/obb/predict10 /workspace/predict
+
+
+
+
+
+-----------------------------HOW TO KNOW WHICH CONFIDENCE TO CHOOSE----------------------------
+
+Scenario								Confidence
+
+Debug / evaluation							0.20 – 0.30
+General inference							0.30 – 0.40
+Production (quality OK)							0.40 – 0.60
+Safety-critical (no false positives allowed)				0.60 – 0.80
+
+
