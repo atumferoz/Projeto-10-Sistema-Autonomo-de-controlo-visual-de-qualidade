@@ -1,169 +1,167 @@
 from ultralytics import YOLO
 from pathlib import Path
+from datetime import datetime
 import json
 import csv
 import cv2
 import numpy as np
-from collections import defaultdict
 
-# ----------------------------
-# CONFIG
-# ----------------------------
-MODEL_PATH = "runs/obb/parafuso_porca_train_v1/weights/best.pt"
-IMAGE_DIR = "data/parafuso_porcas/images/val"
-OUT_DIR = Path("outputs")
+# =========================
+# CONFIGURATION
+# =========================
+MODEL_PATH = "runs_V2/obb/parafuso_porca_train_v1/weights/best.pt"
+IMAGE_SOURCE = "data/parafuso_porcas/images/val"
 CONF_THRES = 0.5
+IMG_SIZE = 640
+DEVICE = 0
 
-OUT_DIR.mkdir(exist_ok=True)
-(OUT_DIR / "annotated").mkdir(exist_ok=True)
+# Calibration (CHANGE THIS after real measurement)
+PX_PER_MM = 10.0  # example: 10 pixels = 1 mm
 
-# ----------------------------
+CLASS_NAMES = {
+    0: "Parafuso",
+    1: "Porca"
+}
+
+# =========================
+# OUTPUT DIRECTORIES
+# =========================
+RUN_NAME = datetime.now().strftime("inference_%Y-%m-%d_%H-%M-%S")
+BASE_OUTPUT_DIR = Path("runs") / RUN_NAME
+ANNOTATED_DIR = BASE_OUTPUT_DIR / "annotated"
+
+ANNOTATED_DIR.mkdir(parents=True, exist_ok=True)
+
+# =========================
 # LOAD MODEL
-# ----------------------------
+# =========================
 model = YOLO(MODEL_PATH)
 
-# ----------------------------
+# =========================
 # RUN INFERENCE
-# ----------------------------
+# =========================
 results = model(
-    source=IMAGE_DIR,
+    source=IMAGE_SOURCE,
     conf=CONF_THRES,
-    imgsz=640,
-    device=0
+    imgsz=IMG_SIZE,
+    device=DEVICE
 )
 
-# ----------------------------
-# COLLECT RAW DETECTIONS
-# ----------------------------
-detections = []
+all_detections = []
 
+# =========================
+# PROCESS RESULTS
+# =========================
 for r in results:
-    image_name = Path(r.path).name
+    image_path = Path(r.path)
+    image_name = image_path.name
 
-    if r.obb is None:
+    img = cv2.imread(str(image_path))
+    if img is None or r.obb is None:
         continue
 
-    obb = r.obb.cpu()
+    boxes = r.obb.cpu()
+    detections = []
 
-    for i in range(len(obb.cls)):
-        cls_id = int(obb.cls[i])
-        conf = float(obb.conf[i])
+    # ---- Extract detections
+    for i in range(len(boxes)):
+        cls_id = int(boxes.cls[i])
+        conf = float(boxes.conf[i])
+        cx, cy, w, h, angle = boxes.xywhr[i].tolist()
 
-        cx, cy, w, h, angle = obb.xywhr[i].tolist()
+        # Convert to mm
+        w_mm = w / PX_PER_MM
+        h_mm = h / PX_PER_MM
+        short_mm = min(w_mm, h_mm)
+        long_mm = max(w_mm, h_mm)
 
         detections.append({
             "image": image_name,
             "class_id": cls_id,
-            "class_name": model.names[cls_id],
+            "class_name": CLASS_NAMES[cls_id],
             "confidence": conf,
             "cx_px": cx,
             "cy_px": cy,
-            "w_px": w,
-            "h_px": h,
-            "angle_rad": angle,
-            "long_side_px": max(w, h),
-            "short_side_px": min(w, h)
+            "w_mm": round(w_mm, 2),
+            "h_mm": round(h_mm, 2),
+            "short_mm": round(short_mm, 2),
+            "long_mm": round(long_mm, 2),
+            "angle_deg": round(angle, 2),
+            "box_index": i
         })
 
-# ----------------------------
-# SAVE RAW JSON
-# ----------------------------
-with open(OUT_DIR / "detections_raw.json", "w") as f:
-    json.dump(detections, f, indent=2)
+    # ---- Analyze parafusos only
+    parafusos = [d for d in detections if d["class_name"] == "Parafuso"]
 
-print("✔ Saved detections_raw.json")
+    if len(parafusos) == 1:
+        parafusos[0]["size_label"] = "ONLY"
+    elif len(parafusos) > 1:
+        sorted_p = sorted(parafusos, key=lambda x: x["long_mm"])
+        sorted_p[0]["size_label"] = "SHORTEST"
+        sorted_p[-1]["size_label"] = "LONGEST"
+        for mid in sorted_p[1:-1]:
+            mid["size_label"] = "IN-BETWEEN"
 
-# ----------------------------
-# GROUP BY IMAGE & COMPARE BOLTS
-# ----------------------------
-by_image = defaultdict(list)
-
-for d in detections:
-    if d["class_name"] == "Parafuso":
-        by_image[d["image"]].append(d)
-
-for image_name, bolts in by_image.items():
-    if len(bolts) < 2:
-        for b in bolts:
-            b["length_label"] = "ONLY_ONE"
-        continue
-
-    max_len = max(b["long_side_px"] for b in bolts)
-
-    for b in bolts:
-        if abs(b["long_side_px"] - max_len) < 1e-3:
-            b["length_label"] = "LONGEST"
-        else:
-            b["length_label"] = "SHORTER"
-
-# Add default label for Porcas
-for d in detections:
-    if d["class_name"] != "Parafuso":
-        d["length_label"] = "N/A"
-
-# ----------------------------
-# SAVE CSV
-# ----------------------------
-csv_path = OUT_DIR / "results.csv"
-
-with open(csv_path, "w", newline="") as f:
-    writer = csv.DictWriter(f, fieldnames=detections[0].keys())
-    writer.writeheader()
-    writer.writerows(detections)
-
-print("✔ Saved results.csv")
-
-# ----------------------------
-# DRAW ANNOTATED IMAGES
-# ----------------------------
-for r in results:
-    img = cv2.imread(r.path)
-    image_name = Path(r.path).name
-
-    if r.obb is None:
-        continue
-
-    obb = r.obb.cpu()
-    boxes = obb.xyxyxyxy.numpy()  # shape: (N, 8)
-
-    for i in range(len(obb.cls)):
-        cls_id = int(obb.cls[i])
-        class_name = model.names[cls_id]
-        conf = float(obb.conf[i])
-
-        # match detection entry
-        det = next(
-            d for d in detections
-            if d["image"] == image_name
-            and abs(d["confidence"] - conf) < 1e-3
-            and d["class_name"] == class_name
-        )
-
-        pts = boxes[i].reshape(-1, 2).astype(np.int32)
+    # ---- Draw annotations
+    for d in detections:
+        i = d["box_index"]
+        pts = boxes.xyxyxyxy[i].numpy().reshape(-1, 2).astype(int)
 
         # Color logic
-        if det["length_label"] == "LONGEST":
-            color = (0, 0, 255)      # Red
-        elif det["length_label"] == "SHORTER":
-            color = (0, 255, 255)    # Yellow
-        else:
-            color = (0, 255, 0)      # Green
+        color = (0, 255, 255)  # yellow default
 
-        cv2.polylines(img, [pts], isClosed=True, color=color, thickness=2)
+        if d["class_name"] == "Parafuso":
+            if d.get("size_label") == "SHORTEST":
+                color = (255, 0, 0)      # blue
+            elif d.get("size_label") == "LONGEST":
+                color = (0, 255, 0)      # green
+            elif d.get("size_label") == "ONLY":
+                color = (255, 0, 255)    # purple
+            elif d.get("size_label") == "IN-BETWEEN":
+                color = (0, 165, 255)    # orange
 
-        label = f"{class_name} | {det['length_label']} | {conf:.2f}"
-        text_pos = (int(det["cx_px"]), int(det["cy_px"]))
+        cv2.polylines(img, [pts], True, color, 2)
+
+        label = (
+            f"{d['class_name']} "
+            f"{d.get('size_label','')} "
+            f"{d['long_mm']}mm "
+            f"{d['confidence']:.2f}"
+        )
 
         cv2.putText(
             img,
-            label,
-            text_pos,
+            label.strip(),
+            (int(d["cx_px"]), int(d["cy_px"])),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
+            0.5,
             color,
             2
         )
 
-    cv2.imwrite(str(OUT_DIR / "annotated" / image_name), img)
+        all_detections.append(d)
 
-print("✔ Saved annotated images")
+    # ---- Save annotated image
+    cv2.imwrite(str(ANNOTATED_DIR / image_name), img)
+
+# =========================
+# SAVE JSON
+# =========================
+json_path = BASE_OUTPUT_DIR / "detections.json"
+with open(json_path, "w") as f:
+    json.dump(all_detections, f, indent=2)
+
+# =========================
+# SAVE CSV
+# =========================
+csv_path = BASE_OUTPUT_DIR / "detections.csv"
+with open(csv_path, "w", newline="") as f:
+    writer = csv.DictWriter(f, fieldnames=all_detections[0].keys())
+    writer.writeheader()
+    writer.writerows(all_detections)
+
+print(f"\n✅ Inference complete")
+print(f"📁 Results saved to: {BASE_OUTPUT_DIR}")
+print(f"🖼 Annotated images: {ANNOTATED_DIR}")
+print(f"📄 CSV: {csv_path}")
+print(f"📄 JSON: {json_path}")
